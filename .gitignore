@@ -1,0 +1,11 @@
+# 编译产物
+*.o
+*.hsaco
+*.kd
+bin/
+build/
+aql_run
+
+# 系统/隐藏文件
+.DS_Store
+.vscode/
