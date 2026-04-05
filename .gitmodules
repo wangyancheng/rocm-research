@@ -1,6 +1,8 @@
 [submodule "ROCR-Runtime"]
 	path = ROCR-Runtime
 	url = https://github.com/wangyancheng/ROCR-Runtime.git
+	branch = rocm-5.6.0
 [submodule "ROCT-Thunk-Interface"]
 	path = ROCT-Thunk-Interface
 	url = https://github.com/wangyancheng/ROCT-Thunk-Interface.git
+	branch = rocm-5.6.0
