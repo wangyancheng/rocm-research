@@ -8,3 +8,7 @@ build/
 # 系统/隐藏文件
 .DS_Store
 .vscode/
+
+#Claude文件
+.claude.json
+.claudeignore
