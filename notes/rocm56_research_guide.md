@@ -46,6 +46,127 @@
 └─────────────────────────────────────────────┘
 ```
 
+分工图
+
+```mermaid
+flowchart TD
+    subgraph User_Space [用户态层]
+        HIP["HIP Runtime (libamdhip64.so)<br/>• API 翻译与分发<br/>• 管理 Stream/Context<br/>• 参数打包为 Kernarg"]
+        ROCr["ROCr / HSA Runtime (libhsa-runtime64.so)<br/>• Agent 管理 (CPU/GPU)<br/>• 构建 64B AQL Packet<br/>• 信号同步 (hsa_signal_t)<br/>• 代码对象加载"]
+        Thunk["ROCT / Thunk (libhsakmt.so)<br/>• 内存映射 (fmm)<br/>• ioctl 封装<br/>• Doorbell 地址映射"]
+    end
+
+    subgraph Kernel_Space [内核态层]
+        KFD["KFD (AMDKFD)<br/>• 上下文切换<br/>• GPU 内存分页错误处理<br/>• 多进程资源隔离"]
+        AMDGPU["AMDGPU<br/>• 硬件初始化<br/>• 电源/频率管理<br/>• 中断处理"]
+    end
+
+    subgraph Hardware ["硬件层 - MI50 (GFX906/Vega20)"]
+        CP["CP (Command Processor)<br/>• 从内存拉取 AQL Packet"]
+        Dispatch["硬件调度器<br/>• 任务分发给 CU"]
+        CU["CU (Compute Unit)<br/>• Wavefront 执行 SIMD 指令"]
+    end
+
+    HIP -->|hipLaunchKernel| ROCr
+    ROCr -->|AQL 包| Thunk
+    Thunk -->|"ioctl (KFD_IOC_*)"| KFD
+    Thunk -->|Doorbell 写入| CP
+    KFD <-->|资源管理/中断| AMDGPU
+    CP -->|解析 AQL| Dispatch
+    Dispatch -->|派发| CU
+    
+    AMDGPU -.->|硬件初始化/电源| CP
+    CU -.->|执行完成中断| AMDGPU
+```
+
+**ROCm 执行全链路（核心图）**
+
+```mermaid
+flowchart TD
+
+%% =====================
+%% USER SPACE
+%% =====================
+subgraph USER_SPACE
+A[hsa_queue_create]
+B[Queue ring buffer AQL]
+C[Write dispatch packet]
+D[Write doorbell]
+E[hsa_signal wait or store]
+end
+
+%% =====================
+%% ROCT
+%% =====================
+subgraph ROCT
+F[hsaKmtCreateQueue]
+G[hsaKmtMapMemory]
+H[hsaKmtSignal]
+end
+
+%% =====================
+%% KERNEL
+%% =====================
+subgraph KERNEL
+I[kfd ioctl create queue]
+J[KFD queue object]
+K[GPU page table setup]
+L[Doorbell mapping]
+M[Interrupt or fault handler]
+end
+
+%% =====================
+%% GPU
+%% =====================
+subgraph GPU
+N[Command processor]
+O[Hardware queue]
+P[Compute unit]
+Q[Wavefront 64 threads]
+R[SIMD execution]
+S[Memory access]
+end
+
+%% =====================
+%% MEMORY
+%% =====================
+subgraph MEMORY
+T[System RAM]
+U[VRAM]
+V[Signal memory]
+end
+
+%% =====================
+%% FLOW
+%% =====================
+
+A --> F
+F --> I
+I --> J
+I --> K
+I --> L
+
+J --> B
+B --> C
+C --> D
+
+D --> N
+N --> O
+O --> P
+P --> Q
+Q --> R
+
+R --> S
+S --> T
+S --> U
+
+R --> V
+E --> V
+
+V --> M
+M --> E
+```
+
 **核心数据流（一次 kernel dispatch）：**
 
 ```
@@ -60,6 +181,92 @@ hipLaunchKernel()
 ```
 
 ---
+
+调用图
+
+```mermaid
+sequenceDiagram
+    participant App as 用户程序
+    box LightBlue 用户态层
+    participant HIP as HIP Runtime
+    participant ROCr as ROCr (HSA)
+    participant Thunk as ROCT (Thunk)
+    end
+    box LightGray 内核态层
+    participant KFD as KFD Driver
+    end
+    box Gold 硬件层
+    participant CP as GPU CP
+    participant CU as GPU CU
+    end
+
+    App->>HIP: 调用 hipLaunchKernel
+    HIP->>ROCr: 映射为 hsa_executable / hsa_queue
+    Note right of ROCr: 组装 AQL Packet
+    ROCr->>ROCr: 写入 User-mode Queue (Memory)
+    
+    rect rgb(240, 240, 240)
+    Note over ROCr, CP: 关键路径：绕过内核 (Bypass Kernel)
+    ROCr->>CP: 写 Doorbell (MMIO)
+    end
+
+    CP->>ROCr: 从内存读取 AQL Packet
+    CP->>CU: 派发 Wavefronts
+    CU->>CU: 执行指令 (ALU/LDS/Memory)
+    
+    CU->>CP: 执行完成
+    CP->>ROCr: 触发 Signal (Completion)
+    
+    Note over App, KFD: 异常或资源请求时触发
+    ROCr-->>Thunk: 请求内存/资源
+    Thunk-->>KFD: ioctl (AMDKFD_IOC_...)
+    KFD-->>Thunk: 返回结果
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    
+    participant CPU as Host CPU (App/HIP/ROCr)
+    participant Mem as System/GPU Memory
+    participant Doorbell as GPU Doorbell (MMIO)
+    participant CP as GPU Command Processor
+    participant CU as GPU Compute Units
+    participant L2 as L2 Cache / HBM
+
+    Note over CPU, L2: === 1. 数据准备阶段 (Data Flow) ===
+    CPU-->>Mem: 异步拷贝 Kernargs & 输入数据到显存
+    Note right of CPU: 此时数据在内存，但对 GPU 尚未“可见”
+
+    Note over CPU, L2: === 2. 控制流触发 (Control Flow) ===
+    CPU->>Mem: 写入 AQL Packet 到 Ring Buffer
+    CPU->>Doorbell: 写 Doorbell (Notify GPU)
+    
+    CP->>Mem: 抓取 AQL Packet
+    CP->>CP: 解析指令 & 映射资源
+
+    Note over CPU, L2: === 3. 执行与同步流 (Sync/Execution Flow) ===
+    CP->>CU: 派发 Wavefronts
+    
+    rect rgb(240, 240, 240)
+    Note right of CU: GPU 执行计算 (Compute Flow)
+    CU-->>L2: 读写中间结果 (Data Flow)
+    end
+
+    CU->>CP: 执行完毕信号 (EOP)
+    
+    Note over CP, L2: --- 关键同步：Memory Consistency ---
+    CP->>L2: 触发 Cache Flush (确保数据落盘)
+    L2-->>Mem: 数据刷回显存 (Data Flow)
+
+    CP->>Mem: 10. 写 Completion Signal = 0 (Sync Flow)
+    
+    Note over CPU: hsa_signal_wait_acquire()
+    Mem-->>CPU: 11. CPU 检测到信号变化
+    Note left of CPU: 同步完成：控制权回到用户程序
+```
+
+
 
 ## 2. 必读文档清单
 
@@ -101,7 +308,40 @@ linux/drivers/gpu/drm/amd/amdkfd/
     kfd_ioctl.h             # IOCTL 命令表（与 hsakmt.h 一一对应）
 ```
 
----
+### 2.4 GCN3 / GCN5 ISA（MI50 属于 Vega → GCN5）
+
+| 章节                   | 重点           |
+| ---------------------- | -------------- |
+| Kernel Dispatch Packet | AQL → 硬件解释 |
+| Wavefront / SIMD       | GPU执行模型    |
+| SGPR / VGPR            | 寄存器模型     |
+| Barrier / Waitcnt      | 同步机制       |
+
+### 2.5 补充
+
+**硬件指令集 (ISA) 文档**
+
+**文档名称：** [AMD Vega 7nm Instruction Set Architecture](https://www.google.com/search?q=https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-7nm-instruction-set-architecture.pdf)
+
+**Chapter 4. Occupancy:** 理解 Workgroup 是如何映射到 CU 的物理资源（VGPR/SGPR）上的。
+
+**Chapter 13. Vector Memory Operations:** 配合你清单里的 `amdgpu-memory-model.rst` 阅读，理解指令级是如何处理 **Flat/Global/LDS** 内存访问的。
+
+**编译器后端视角（连接源码与二进制）**
+
+**文档/资源：** [LLVM Target Description for AMDGPU](https://llvm.org/docs/AMDGPUUsage.html)
+
+**用途：** * 这里记录了针对 **gfx906 (MI50)** 的具体后端限制。
+
+- 它详细说明了 **Kernel Descriptor**（内核描述符）的每一个 Bit 位，这正是 ROCR 加载 Code Object 时必须解析的数据结构。
+
+**SDMA 机制文档（异步内存拷贝的核心）**
+
+你清单中的 AQL 主要是计算队列，但研究架构绕不开数据搬运。
+
+- **推荐搜索关键词：** `SDMA (System Direct Memory Access)` in `amdgpu` kernel documentation.
+- **核心逻辑：** * SDMA 有自己独立的 Ring Buffer 和 Packet 格式（非 AQL 格式）。
+  - 了解 SDMA 如何处理 **Page Migration**（分级内存管理）以及它是如何与 HMM (Heterogeneous Memory Management) 协作的。
 
 ## 3. 源码仓库与关键路径
 
@@ -687,4 +927,4 @@ ROCr 的实际处理（gfx906）：
 
 ---
 
-*文档版本：2026-04  目标：ROCm 5.6 / MI50 (gfx906)*
+*文档版本：2026-04  目标：ROCm 5.6 / MI50 (gfx906)*< Empty Mermaid Block >
