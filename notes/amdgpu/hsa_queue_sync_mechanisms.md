@@ -420,4 +420,7 @@ xxxxxxxxxxflowchart TD
 ---
 
 *文档版本：2026-04*  
+
+
+
 *参考：HSA System Architecture 1.1.1, ring-buffer.rst, amd_aql_queue.cpp*
