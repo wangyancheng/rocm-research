@@ -298,9 +298,10 @@ sequenceDiagram
     participant GPU_CP
 
     CPU->>Memory: 写 kernel_object / kernarg 等字段
-    CPU->>Memory: __atomic_store_n(header, SEQ_CST)\n≡ 完整内存屏障
-    CPU->>GPU_CP: hsa_signal_store_release(doorbell, index)\nrelease 语义，写 MMIO
+    CPU->>Memory: __atomic_store_n(header, SEQ_CST)<br/>(完整内存屏障)
+    CPU->>GPU_CP: hsa_signal_store_release(doorbell, index)<br/>(release 语义，写 MMIO)
     GPU_CP->>Memory: 读 packet（header 有效，字段已就绪）
+
 ```
 
 ---
@@ -388,18 +389,58 @@ flowchart TD
 ## 完整同步时序：一次 dispatch 的8个机制协作
 
 ```mermaid
-xxxxxxxxxxflowchart TD
-    A["CPU 计算 slot = wptr % size"]
-    B{"slot 是否已被 GPU 消费？<br/>wptr - rptr < size?"}
-    C["写入 packet"]
-    D["队列满，CPU 自旋等待"]
-    E["等待 GPU rptr 推进"]
+sequenceDiagram
+    autonumber
+    participant CPU
+    participant RingBuffer
+    participant Doorbell
+    participant GPU_CP
+    participant GPU_CU
+    participant Signal
 
-    A --> B
-    B -- 是 --> C
-    B -- 否 --> D
-    D --> E
-    E --> BSignalGPU_CUGPU_CPDoorbellRingBufferCPUSignalGPU_CUGPU_CPDoorbellRingBufferCPU#mermaidChart8{font-family:sans-serif;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#mermaidChart8 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#mermaidChart8 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#mermaidChart8 .error-icon{fill:#552222;}#mermaidChart8 .error-text{fill:#552222;stroke:#552222;}#mermaidChart8 .edge-thickness-normal{stroke-width:1px;}#mermaidChart8 .edge-thickness-thick{stroke-width:3.5px;}#mermaidChart8 .edge-pattern-solid{stroke-dasharray:0;}#mermaidChart8 .edge-thickness-invisible{stroke-width:0;fill:none;}#mermaidChart8 .edge-pattern-dashed{stroke-dasharray:3;}#mermaidChart8 .edge-pattern-dotted{stroke-dasharray:2;}#mermaidChart8 .marker{fill:#333333;stroke:#333333;}#mermaidChart8 .marker.cross{stroke:#333333;}#mermaidChart8 svg{font-family:sans-serif;font-size:16px;}#mermaidChart8 p{margin:0;}#mermaidChart8 .actor{stroke:hsl(259.6261682243, 59.7765363128%, 87.9019607843%);fill:#ECECFF;}#mermaidChart8 text.actor>tspan{fill:black;stroke:none;}#mermaidChart8 .actor-line{stroke:hsl(259.6261682243, 59.7765363128%, 87.9019607843%);}#mermaidChart8 .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:#333;}#mermaidChart8 .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:#333;}#mermaidChart8 #arrowhead path{fill:#333;stroke:#333;}#mermaidChart8 .sequenceNumber{fill:white;}#mermaidChart8 #sequencenumber{fill:#333;}#mermaidChart8 #crosshead path{fill:#333;stroke:#333;}#mermaidChart8 .messageText{fill:#333;stroke:none;}#mermaidChart8 .labelBox{stroke:hsl(259.6261682243, 59.7765363128%, 87.9019607843%);fill:#ECECFF;}#mermaidChart8 .labelText,#mermaidChart8 .labelText>tspan{fill:black;stroke:none;}#mermaidChart8 .loopText,#mermaidChart8 .loopText>tspan{fill:black;stroke:none;}#mermaidChart8 .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:hsl(259.6261682243, 59.7765363128%, 87.9019607843%);fill:hsl(259.6261682243, 59.7765363128%, 87.9019607843%);}#mermaidChart8 .note{stroke:#aaaa33;fill:#fff5ad;}#mermaidChart8 .noteText,#mermaidChart8 .noteText>tspan{fill:black;stroke:none;}#mermaidChart8 .activation0{fill:#f4f4f4;stroke:#666;}#mermaidChart8 .activation1{fill:#f4f4f4;stroke:#666;}#mermaidChart8 .activation2{fill:#f4f4f4;stroke:#666;}#mermaidChart8 .actorPopupMenu{position:absolute;}#mermaidChart8 .actorPopupMenuPanel{position:absolute;fill:#ECECFF;box-shadow:0px 8px 16px 0px rgba(0,0,0,0.2);filter:drop-shadow(3px 5px 2px rgb(0 0 0 / 0.4));}#mermaidChart8 .actor-man line{stroke:hsl(259.6261682243, 59.7765363128%, 87.9019607843%);fill:#ECECFF;}#mermaidChart8 .actor-man circle,#mermaidChart8 line{stroke:hsl(259.6261682243, 59.7765363128%, 87.9019607843%);fill:#ECECFF;stroke-width:2px;}#mermaidChart8 :root{--mermaid-alt-font-family:sans-serif;}机制1: 原子递增 write_index机制7: 检查队列未满机制2+3: 写 packet 字段机制2: release 写 header（完整屏障）机制6: fence 已建立，安全写 doorbell机制5: 写 MMIO，低延迟通知机制4: 通过 GPU L2 读 packet调度 wavefront 执行机制8: kernel 内部 barrier（如需要）机制8: kernel 结束 release fence机制2: release 写 signal机制2: acquire 读 signal机制7: GPU 更新 read_index原子 fetch_add(write_index, 1, relaxed)assert(write_index - read_index < size)写 kernel_object / kernarg / grid_size 等__atomic_store_n(header, SEQ_CST)signal_store_release(doorbell, write_index)acquire 读 header（有效）读其他字段（均已就绪）dispatch kernelS_BARRIER（workgroup 内同步）S_WAITCNT + BUFFER_WBINVL1atomic_store(0, RELEASE)signal_wait_acquire() 返回read_index.store(new_val, RELEASE)
+    %% 机制 1 到 3：写入准备
+    Note over CPU: 机制1: 原子递增 write_index
+    CPU->>RingBuffer: 原子 fetch_add(write_index, 1, relaxed)
+    
+    Note over CPU: 机制7: 检查队列未满
+    CPU->>CPU: assert(write_index - read_index < size)
+    
+    Note over CPU, RingBuffer: 机制2+3: 写 packet 字段
+    CPU->>RingBuffer: 写 kernel_object / kernarg / grid_size 等
+    
+    Note over CPU, RingBuffer: 机制2: release 写 header（完整屏障）
+    CPU->>RingBuffer: __atomic_store_n(header, SEQ_CST)
+
+    %% 机制 5 到 6：通知 GPU
+    Note over CPU, Doorbell: 机制6: fence 已建立，安全写 doorbell
+    Note over CPU, Doorbell: 机制5: 写 MMIO，低延迟通知
+    CPU->>Doorbell: signal_store_release(doorbell, write_index)
+
+    %% 机制 4：GPU 读取与调度
+    Note over GPU_CP, RingBuffer: 机制4: 通过 GPU L2 读 packet
+    GPU_CP->>RingBuffer: acquire 读 header（有效）
+    GPU_CP->>RingBuffer: 读其他字段（均已就绪）
+    
+    Note over GPU_CP, GPU_CU: 调度 wavefront 执行
+    GPU_CP->>GPU_CU: dispatch kernel
+
+    %% 机制 8：Kernel 内部与结束
+    Note over GPU_CU: 机制8: kernel 内部 barrier（如需要）
+    GPU_CU->>GPU_CU: S_BARRIER（workgroup 内同步）
+    
+    Note over GPU_CU, Signal: 机制8: kernel 结束 release fence
+    GPU_CU->>GPU_CU: S_WAITCNT + BUFFER_WBINVL1
+    Note over GPU_CU, Signal: 机制2: release 写 signal
+    GPU_CU->>Signal: atomic_store(0, RELEASE)
+
+    %% 机制 2：信号同步与索引更新
+    
+    Note over CPU, Signal: 机制2: acquire 读 signal
+    Signal->>CPU: signal_wait_acquire() 返回
+    
+    Note over CPU: 机制7: GPU 更新 read_index
+    CPU->>GPU_CP: read_index.store(new_val, RELEASE)
+
 ```
 
 ---
@@ -420,7 +461,5 @@ xxxxxxxxxxflowchart TD
 ---
 
 *文档版本：2026-04*  
-
-
 
 *参考：HSA System Architecture 1.1.1, ring-buffer.rst, amd_aql_queue.cpp*
