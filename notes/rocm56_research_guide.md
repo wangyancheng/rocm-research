@@ -451,12 +451,16 @@ export ROCTRACER_DOMAIN=hsa        # 追踪 HSA 层
 # export ROCTRACER_DOMAIN=kfd      # 追踪 KFD 层
 ./your_hsa_app
 # 输出每个 API 调用的时间戳、参数、返回值
+# 输出了文件，但没有内容，暂时放弃。
 
 # ── rocprofiler：完整时序 + 硬件计数器 ──
-rocprof --hsa-trace --hip-trace -o trace_out ./your_hip_app
-# 生成 trace_out.json → 用 chrome://tracing 或 Perfetto 可视化
+export LD_LIBRARY_PATH=/opt/rocm-5.6/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+export PATH=/opt/rocm-5.6/bin:$PATH
+rocprof --hsa-trace --hip-trace -o trace_out.csv ./hsa_vector_add
+# 生成 trace_out.json → 用 chrome://tracing 或 Perfetto 可视化,ui.perfetto.dev
 
 # ── strace：IOCTL 边界观察 ──
+strace -f -e ioctl ./app
 strace -e trace=ioctl -T -v ./your_hsa_app 2>&1 | grep -E 'KFD|AMDGPU'
 # -T 显示每次 ioctl 耗时，-v 显示完整参数结构
 
@@ -473,6 +477,10 @@ sudo bpftrace -e '
 sudo bash -c "echo 'amdgpu:*' > /sys/kernel/debug/tracing/set_event"
 sudo cat /sys/kernel/debug/tracing/trace_pipe &
 ./your_hsa_app
+
+# ── perf ──
+perf record -g ./hsa_vector_add
+perf report
 ```
 
 ### 4.3 内存与地址空间分析
@@ -563,10 +571,22 @@ cat /sys/class/kfd/kfd/topology/nodes/1/properties
 **目标：不读源码，先知道程序运行时发生了什么。**
 
 ```bash
-# Step 1.1：roctracer 追踪 HSA API 调用链
-export HSA_TOOLS_LIB=libroctracer64.so
-export ROCTRACER_DOMAIN=hsa
-./your_hsa_app 2>&1 | tee hsa_trace.log
+# Step 1.1：rocprofiler 追踪 HSA API 调用链
+export LD_LIBRARY_PATH=/opt/rocm-5.6/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+export PATH=/opt/rocm-5.6/bin:$PATH
+rocprof --hsa-trace --hip-trace -o trace_out.csv ./hsa_vector_add
+sqlite3 trace_out.db
+-- 1. 调整输出为清爽的网格表格，并开启列名
+.mode column
+.headers on
+
+-- 2. 核心大招：只提取函数名和时间戳，并严格按开始时间从小到大（从早到晚）排序
+SELECT 
+    Name AS Function_Name,
+    BeginNs AS Start_Timestamp_ns,
+    DurationNs
+FROM HSA
+ORDER BY BeginNs ASC;
 
 # 预期看到的调用顺序：
 # hsa_init

@@ -112,6 +112,10 @@ static hsa_status_t cb_find_agents(hsa_agent_t agent, void* data)
  *   GLOBAL  + COARSE_GRAINED  → VRAM 主显存（最大，用于数据）
  *   GROUP                     → LDS（本地共享内存，每 CU 64 KB）
  *   PRIVATE                   → 每线程寄存器溢出 scratch 空间
+ * Global Segment段类型
+ * 细粒度系统内存池（Fine-Grained Pool）
+ * 粗粒度本地显存池 (Coarse-Grained Pool)
+ * 内核参数专用池 (Kernarg Pool):专门用来承载AQL任务包引用的参数缓冲区
  */
 struct PoolCtx {
     hsa_amd_memory_pool_t gpu_global;   /* GPU VRAM 全局内存池            */
@@ -125,10 +129,10 @@ static hsa_status_t cb_find_gpu_pool(hsa_amd_memory_pool_t pool, void* data)
     auto* ctx = static_cast<PoolCtx*>(data);
 
     hsa_amd_segment_t seg;
-    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);     // 内存段类型：GLOBAL / GROUP / PRIVATE 
 
     /* 只关心 GLOBAL segment（对应 VRAM / Device Memory） */
-    if (seg == HSA_AMD_SEGMENT_GLOBAL && !ctx->gpu_global_found) {
+    if (seg == HSA_AMD_SEGMENT_GLOBAL && !ctx->gpu_global_found) {      // 可能有多个 global pool，选第一个允许分配的（部分 global pool 是只读的）
         /* 检查内存池是否允许分配（部分 GLOBAL pool 是只读的） */
         bool alloc_allowed = false;
         hsa_amd_memory_pool_get_info(pool,
@@ -148,10 +152,10 @@ static hsa_status_t cb_find_cpu_pool(hsa_amd_memory_pool_t pool, void* data)
     hsa_amd_segment_t seg;
     hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);
 
-    if (seg != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+    if (seg != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;       // 只关心 GLOBAL segment
 
     uint32_t flags = 0;
-    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags);
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags);      // 细粒度系统内存池的标志位（HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_*）
 
     /*
      * HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT = 1
@@ -254,6 +258,9 @@ struct KernelArgs {
  *   2. 填写 packet 字段（header 最后写，保证可见性顺序）
  *   3. 原子 store header  → 激活 packet（对 GPU "可见"）
  *   4. store doorbell     → 敲响门铃，通知 CP（Command Processor）
+ *
+ *    Grid：线程总数，必须是 workgroup 大小的整数倍
+ *    Workgroup：GPU 同步执行的线程块，大小由内核编译时指定（本例为 64）
  * ══════════════════════════════════════════════════════════════ */
 static void dispatch_kernel(hsa_queue_t*   queue,
                             uint64_t       kernel_object,
@@ -380,6 +387,7 @@ int main()
     }
 
     /* 查询 wavefront 大小（gfx906 = 64，部分新架构支持 32） */
+    /* MI50,有60个CU，每个CU有64个线程 */
     uint32_t wavefront_size = 0;
     hsa_agent_get_info(agents.gpu, HSA_AGENT_INFO_WAVEFRONT_SIZE, &wavefront_size);
     std::cout << "       GPU Wavefront size: " << wavefront_size << "\n";
@@ -467,6 +475,16 @@ int main()
      *
      * queue->base_address : ring buffer 基址（CPU 可写，GPU 可读）
      * queue->doorbell_signal : CPU 写入触发 CP 取 packet
+     *
+     * 用户模式队列结构
+     * type：队列类型，单生产者（SINGLE）或多生产者（MULTI）
+     * features：队列特征，具体计算任务，特定的控制命令或系统请求
+     * base_address：指向保存队列AQL数据包的虚拟内存基地址
+     * doorbell_signal：用户模式队列的门铃信号，CPU写入触发CP处理队列中的数据包
+      生产者索引（write index）和消费者索引（read index）：
+     *   CPU 通过原子操作更新 write index，GPU 通过原子操作
+     * size: 队列大小（必须是2的幂）
+     * id：队列标识符
      * ────────────────────────────────────────────────────────────*/
     hsa_queue_t* queue;
     HSA_CHECK(hsa_queue_create(
@@ -480,6 +498,21 @@ int main()
 
     /* ────────────────────────────────────────────────────────────
      * 步骤 7：加载 .hsaco，创建 Executable，查找内核符号
+     * 第一阶段：获取代码对象
+     *     1. 编译产物 kernel.hsaco 已包含 GPU 机器码、内核描述符（KD）和元数据（YAML）。
+     *     2. 读取器初始化： 使用 `hsa_code_object_reader_create_from_file` 或 `_from_memory`
+     *        这一步并没有加载指令，而是创建一个句柄，让运行时知道去那里解析这个ELF文件的符号表和段信息。
+     * 第二阶段：创建可执行体容器
+     *     3. 创建 Executable：`hsa_executable_create` 创建一个逻辑上的容器。
+     *     4. 代码驻留和重定位： 调用 `hsa_executable_load_agent_code_object`
+     *         运行时真正分配GPU VRAM,将代码段（.text）从文件拷贝到显存。
+     *         重定位：如果代码中有引用外部变量，运行时会在此刻修正地址，使指令能够正确跳转。
+     * 第三阶段：定位内核入口
+     *     5. 符号检索：hsa_executable_get_symbol_by_name
+     *          你告诉它函数名，它在可执行体的符号表中检索出对应的 `hsa_executable_symbol_t` 句柄。
+     *     6. 提取内核对象： hsa_executable_symbol_get_info
+     *           提取 `HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT`
+     *           这是一个64位的GPU虚拟地址。
      * ────────────────────────────────────────────────────────────*/
     hsa_code_object_reader_t reader;
     hsa_executable_t exe = load_hsaco(agents.gpu, "kernel.hsaco", reader);

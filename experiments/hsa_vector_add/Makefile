@@ -118,4 +118,15 @@ run: all
 
 # ── 清理 ─────────────────────────────────────────────────────
 clean:
+	@# 1. 清理基础构建产物 [1]
 	rm -f $(TARGET) $(HSACO)
+	@# 2. 清理由 rocprof 刷出的所有高级分析报告、数据库、JSON 时间线及系统快照
+	rm -f trace_out.csv trace_out.json trace_out.db
+	rm -f trace_out.stats.csv trace_out.hsa_stats.csv trace_out.sysinfo.txt
+	@# 3. 兼容清理可能残余的用户自定义落盘 CSV 以及 strace 产生的系统调用审计大日志
+	rm -f my_hsa_trace.csv strace_out.log
+	@# 4. 如果以后产生带有 PID 前缀的文件，一并通杀
+	rm -f *_api_trace.csv *_hsa_handles.txt *_begin_ts_file.txt
+	@# 5. 清理perf
+	rm -f perf.data perf.data.old perf.data.* perf.data.*
+	@echo "  [CLEAN] 基础二进制、内核以及 Trace 性能文件已被全量强力抹除！"

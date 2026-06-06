@@ -1,0 +1,2 @@
+"Index","KernelName","gpu-id","queue-id","queue-index","pid","tid","grd","wgr","lds","scr","arch_vgpr","accum_vgpr","sgpr","wave_size","sig","obj","DispatchNs","BeginNs","EndNs","CompleteNs","DurationNs"
+0,"vector_add.kd",1,0,0,35841,35841,1024,64,0,0,8,0,16,64,"0x725c801fea00","0x725c7f82c740",25684579184061,25684579217426,25684579223186,25684579261529,5760

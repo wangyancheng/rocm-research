@@ -8,4 +8,7 @@ export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
 export HIP_CLANG_PATH=$ROCM_PATH/bin
 export DEVICE_LIB_PATH=$ROCM_PATH/amdgcn/bitcode
 
+export LD_LIBRARY_PATH=/opt/rocm-5.6/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+export PATH=/opt/rocm-5.6/bin:$PATH
+
 echo "ROCm 5.6 environment loaded."
