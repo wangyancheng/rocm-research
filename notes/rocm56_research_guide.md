@@ -624,6 +624,89 @@ rocprof --hsa-trace -o rocprof_out ./your_hsa_app
 
 **Phase 1 产出**：一张手绘的调用时序图，标注每个 API 调用对应哪个 IOCTL。
 
+```mermaid
+sequenceDiagram
+    autonumber
+    %% 统一全栈颜色定义
+    autonumber
+    actor User_App as ユーザーアプリケーション (User Space)
+    box RGB(240, 248, 255) 主机 CPU 侧执行链路
+    participant HSA_API as ROCR-Runtime<br/>(HSA C-API)
+    participant Thunk as ROCT-Thunk-Interface<br/>(libhsakmt.so)
+    end
+    box RGB(255, 240, 245) Linux 内核与硬件层
+    participant Kernel as Linux Kernel<br/>(AMDKFD 驱动)
+    participant GPU as AMD GPU 硬件<br/>(gfx906 / MI50)
+    end
+
+    %% ==========================================
+    title ROCm 5.x 全栈软硬件协同执行时序联合图谱
+
+    %% Phase 1
+    rect RGB(230, 245, 255)
+    note over User_App, GPU: 【阶段一】拓扑发现与虚拟内存上下文建立 (Initialization)
+    User_App->>HSA_API: 1. 执行 hsa_iterate_agents() [19871 ns]
+    HSA_API->>Thunk: 路由下探并调用底层接口
+    Thunk->>Kernel: ioctl(AMDKFD_IOC_GET_VERSION) <0.000019s>
+    Kernel-->>Thunk: 确认 KFD 驱动版本匹配 5.6.0
+    Thunk->>Kernel: ioctl(AMDKFD_IOC_ACQUIRE_VM) <0.000087s>
+    Kernel-->>GPU: 强行在硬件层划分并隔离出独立的 GPU 虚拟内存空间 (VM)
+    User_App->>HSA_API: 2. 连续 5 次 hsa_agent_get_info() 查询硬件属性
+    User_App->>HSA_API: 3. 连续 2 次迭代内存池，9 次调用 hsa_amd_memory_pool_get_info()
+    end
+
+    %% Phase 2
+    rect RGB(255, 240, 240)
+    note over User_App, GPU: 【阶段二】物理显存划分与内存映射 (Memory Allocation)
+    User_App->>HSA_API: 4. 执行 hsa_amd_memory_pool_allocate() 分配 VRAM 数组 [64451 ns]
+    HSA_API->>Kernel: ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU) <0.000005s>
+    Kernel-->>HSA_API: 在显卡物理 VRAM 颗粒上圈出特定页框
+    User_App->>HSA_API: 5. 执行 hsa_amd_agents_allow_access() 打通对等硬件寻址
+    HSA_API->>Kernel: ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU) <0.000019s>
+    Kernel-->>GPU: 强行将物理页绑定到 GPU MMU 页表项中，开启硬件级寻址控制
+    end
+
+    %% Phase 3
+    rect RGB(245, 255, 240)
+    note over User_App, GPU: 【阶段三】主机数据搬运与核心 AQL 环形队列建立
+    User_App->>HSA_API: 6. 核心大头 hsa_memory_copy() 将数据泵入显存 [3700622 ns]
+    note over HSA_API, Kernel: 数据成批跨越物理 PCIe 桥传输至 GPU 刚刚 MAP 好的 VRAM 阵列中
+    User_App->>HSA_API: 7. 执行 hsa_queue_create() 创建核心调度队列 [1989117 ns]
+    HSA_API->>Kernel: ioctl(AMDKFD_IOC_CREATE_QUEUE) <0.000130s>
+    Kernel-->>GPU: HWS 锁定物理通道，分配一组真正的硬件 Doorbell(门铃) MMIO 物理映射
+    end
+
+    %% Phase 4
+    rect RGB(255, 255, 230)
+    note over User_App, GPU: 【阶段四】机器码镜像装载与用户态零内核态开销任务提交 (The Dispatch Loop)
+    User_App->>HSA_API: 8. 执行 hsa_executable_load_agent_code_object() 载入编译好的二进制 ELF
+    User_App->>HSA_API: 9. 执行 hsa_executable_freeze()，GPU 硬件指令解码器就绪 [64350 ns]
+    User_App->>HSA_API: 10. 分配 88 字节的 Kernarg 入参空间
+    User_App->>HSA_API: 11. 执行 hsa_queue_add_write_index_screlease() 原子推进指针 [仅耗时 427 ns!]
+    note over User_App, HSA_API: 极其惊艳：User Space 纯内存操作，完全没有任何 ioctl 系统调用介入！
+    User_App->>HSA_API: 12. 执行 hsa_signal_store_relaxed() [25479 ns]
+    HSA_API->>GPU: 💥 物理闪击：通过 MMIO 物理映射地址直接写显卡寄存器，拉响硬件 Doorbell 门铃！
+    note over Kernel: 🌟 奇迹诞生：Linux 内核大门自始至终处于闭合围观状态，内核零开销！
+    GPU->>GPU: 🚀 GPU 硬件计算单元 (Compute Units) 咆哮计算 vector_add.kd [持续 5760 ns]
+    User_App->>HSA_API: 13. 执行 hsa_signal_wait_scacquire() 主机陷入自旋同步等待 [54224 ns]
+    GPU-->>User_App: 计算完毕，硬件将同步信号刷回 0，主机解除挂起屏障 (Fence)
+    end
+
+    %% Phase 5
+    rect RGB(240, 240, 240)
+    note over User_App, GPU: 【阶段五】数据回收与销毁清场 (Teardown)
+    User_App->>HSA_API: 14. 再次 hsa_memory_copy() 将计算结果从 PCIe 桥拷回 CPU 主存
+    User_App->>HSA_API: 15. 执行 hsa_queue_destroy() 卸磨杀驴释放队列 [792612 ns]
+    HSA_API->>Kernel: ioctl(AMDKFD_IOC_DESTROY_QUEUE) <0.000044s>
+    User_App->>HSA_API: 16. 连续 4 次 hsa_memory_free() 释放显存阵列
+    HSA_API->>Kernel: 连续物理下发 AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU <0.000011s>
+    HSA_API->>Kernel: 连续物理下发 AMDKFD_IOC_FREE_MEMORY_OF_GPU <0.000004s>
+    Kernel-->>User_App: 物理页框全部归还给 Linux 操作系统公共内存池，程序 PASS 完美离场！
+    end
+```
+
+
+
 ---
 
 ### Phase 2：ROCr 源码对照（3-5 天）
