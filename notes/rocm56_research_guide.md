@@ -581,6 +581,7 @@ sqlite3 trace_out.db
 .headers on
 
 -- 2. 核心大招：只提取函数名和时间戳，并严格按开始时间从小到大（从早到晚）排序
+sqlite3 trace_out.db
 SELECT 
     Name AS Function_Name,
     BeginNs AS Start_Timestamp_ns,
@@ -590,32 +591,280 @@ ORDER BY BeginNs ASC;
 
 # 预期看到的调用顺序：
 # hsa_init
-# hsa_iterate_agents
-# hsa_amd_agent_iterate_memory_pools
-# hsa_queue_create
-# hsa_signal_create
-# hsa_code_object_reader_create_from_memory
-# hsa_executable_create / load / freeze
-# hsa_executable_get_symbol_by_name
-# hsa_amd_memory_pool_allocate  (×2)
-# hsa_amd_agents_allow_access   (×2)
-# hsa_memory_copy
-# hsa_queue_add_write_index
-# hsa_signal_store_release       (doorbell)
-# hsa_signal_wait_acquire
-# hsa_memory_copy
-# hsa_signal_destroy / hsa_queue_destroy / hsa_shut_down
+hsa_iterate_agents
+hsa_agent_get_info
+hsa_agent_get_info
+hsa_agent_get_info
+hsa_agent_get_info
+hsa_agent_get_info
+hsa_amd_agent_iterate_memory_pools
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_get_info
+hsa_amd_agent_iterate_memory_pools
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_get_info
+hsa_amd_memory_pool_allocate
+hsa_amd_memory_pool_allocate
+hsa_amd_memory_pool_allocate
+hsa_amd_agents_allow_access
+hsa_amd_agents_allow_access
+hsa_amd_agents_allow_access
+hsa_memory_copy
+hsa_memory_copy
+hsa_queue_create
+hsa_code_object_reader_create_from_memory
+hsa_executable_create
+hsa_executable_load_agent_code_object
+hsa_executable_freeze
+hsa_signal_create
+hsa_signal_wait_scacquire
+hsa_signal_destroy
+hsa_executable_get_symbol_by_name
+hsa_executable_symbol_get_info
+hsa_executable_symbol_get_info
+hsa_executable_symbol_get_info
+hsa_executable_symbol_get_info
+hsa_amd_memory_pool_allocate
+hsa_amd_agents_allow_access
+hsa_signal_create
+hsa_queue_add_write_index_screlease
+hsa_queue_load_read_index_scacquire
+hsa_signal_store_relaxed
+hsa_dispatch
+hsa_signal_wait_scacquire
+hsa_memory_copy
+hsa_memory_free
+hsa_memory_free
+hsa_memory_free
+hsa_memory_free
+hsa_signal_destroy
+hsa_queue_destroy
+hsa_executable_destroy
+hsa_code_object_reader_destroy
+
 
 # Step 1.2：strace 观察 IOCTL 边界
-strace -e trace=ioctl -T -o ioctl_trace.log ./your_hsa_app
-grep -E 'KFD|ioctl' ioctl_trace.log
+cat ioctl_trace.log
+
+ioctl(3, AMDKFD_IOC_GET_VERSION, 0x7ffe2d437720) = 0 <0.000019>
+ioctl(7, DRM_IOCTL_VERSION, 0x55e85197aae0) = 0 <0.000003>
+ioctl(7, DRM_IOCTL_VERSION, 0x55e85197aae0) = 0 <0.000003>
+ioctl(8, DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_SIS_FB_FREE, 0x7ffe2d436e70) = 0 <0.000003>
+ioctl(8, DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_SIS_FB_FREE, 0x7ffe2d436e70) = 0 <0.000036>
+ioctl(8, DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_SIS_FB_FREE, 0x7ffe2d436e70) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, 0x7ffe2d437080) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ACQUIRE_VM, 0x7ffe2d4371c0) = 0 <0.000087>
+ioctl(3, AMDKFD_IOC_SET_MEMORY_POLICY, 0x7ffe2d437200) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d437140) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d437160) = 0 <0.000019>
+ioctl(3, AMDKFD_IOC_SET_XNACK_MODE, 0x7ffe2d437474) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_GET_CLOCK_COUNTERS, 0x7ffe2d436f90) = 0 <0.000007>
+ioctl(5, DRM_IOCTL_VERSION, 0x55e85197a1f0) = 0 <0.000002>
+ioctl(5, DRM_IOCTL_VERSION, 0x55e85197a1f0) = 0 <0.000002>
+ioctl(7, DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_SIS_FB_FREE, 0x7ffe2d436ec0) = 0 <0.000002>
+ioctl(7, DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_SIS_FB_FREE, 0x7ffe2d436ec0) = 0 <0.000217>
+ioctl(7, DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_SIS_FB_FREE, 0x7ffe2d436ec0) = 0 <0.000003>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x82, 0x28), 0x7ffe2d437540) = -1 ENOTTY (对设备不适当的 ioctl 操作) <0.000002>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d437490) = 0 <0.000007>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d437580) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_CREATE_EVENT, 0x7ffe2d4376d0) = 0 <0.000007>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d437080) = 0 <0.000026>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d437030) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_CREATE_EVENT, 0x7ffe2d437490) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_SET_SCRATCH_BACKING_VA, 0x7ffe2d437650) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436d30) = 0 <0.000007>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436ce0) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d437210) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d4371c0) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_SET_TRAP_HANDLER, 0x7ffe2d437700) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d4371d0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d4371a0) = 0 <0.000012>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x20), 0x7ffe2d437450) = 0 <0.000005>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x20), 0x7ffe2d437330) = 0 <0.000022>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436a60) = 0 <0.000007>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436a10) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436ac0) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436a70) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_CREATE_EVENT, 0x7ffe2d436fe0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436be0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436cd0) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436a50) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436b00) = 0 <0.000005>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x40), 0x7ffe2d436b20) = 0 <0.003120>
+ioctl(3, AMDKFD_IOC_CREATE_QUEUE, 0x7ffe2d436e80) = 0 <0.000130>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436ca0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436d30) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436ee0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436ef0) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_SET_EVENT, 0x7ffe2d436ed0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436b50) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436b00) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_CREATE_EVENT, 0x7ffe2d4371f0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436f20) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436ed0) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436a40) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d4369f0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436a40) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d4369f0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436a40) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d4369f0) = 0 <0.000004>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x20), 0x7ffe2d437450) = 0 <0.000004>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x20), 0x7ffe2d437330) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436e80) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436e30) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436ee0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436e90) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d437000) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d4370f0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436e70) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436f20) = 0 <0.000004>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x40), 0x7ffe2d436f40) = 0 <0.001515>
+ioctl(3, AMDKFD_IOC_CREATE_QUEUE, 0x7ffe2d4372a0) = 0 <0.000127>
+ioctl(3, AMDKFD_IOC_SET_EVENT, 0x7ffe2d4372f0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436f70) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436f20) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436a50) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436a20) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d436a70) = 0 <0.000009>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d436a20) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_CREATE_EVENT, 0x7ffe2d4371c0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, 0x7ffe2d437460) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_MAP_MEMORY_TO_GPU, 0x7ffe2d4373d0) = 0 <0.000006>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x20), 0x7ffe2d437450) = 0 <0.000004>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x20, 0x20), 0x7ffe2d437330) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437670) = 0 <0.000014>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437660) = 0 <0.000006>
+ioctl(3, AMDKFD_IOC_SET_EVENT, 0x7ffe2d4376d0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_DESTROY_QUEUE, 0x7ffe2d437770) = 0 <0.000044>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437650) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437650) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437650) = 0 <0.000017>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437650) = 0 <0.000009>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4374e0) = 0 <0.000012>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4374d0) = 0 <0.000005>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437500) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4374f0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437490) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437480) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437470) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437460) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437470) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437460) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4373a0) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437390) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4373a0) = 0 <0.000010>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437390) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4373a0) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437390) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4373d0) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4373c0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437480) = 0 <0.000012>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437430) = 0 <0.000008>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437450) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437440) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437420) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437410) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4374c0) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4374b0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_SET_EVENT, 0x7ffe2d437540) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_DESTROY_QUEUE, 0x7ffe2d4375e0) = 0 <0.000051>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4374c0) = 0 <0.000011>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4374c0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4374c0) = 0 <0.000014>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4374c0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437350) = 0 <0.000013>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437340) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_DESTROY_EVENT, 0x7ffe2d4375f0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437370) = 0 <0.000013>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437360) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437300) = 0 <0.000013>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4372f0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_SET_EVENT, 0x7ffe2d437750) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_DESTROY_EVENT, 0x7ffe2d4377c0) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d4374e0) = 0 <0.000013>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d4374d0) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_DESTROY_EVENT, 0x7ffe2d437660) = 0 <0.000003>
+ioctl(3, AMDKFD_IOC_DESTROY_EVENT, 0x7ffe2d437660) = 0 <0.000002>
+ioctl(3, AMDKFD_IOC_DESTROY_EVENT, 0x7ffe2d437660) = 0 <0.000002>
+ioctl(3, _IOC(_IOC_READ|_IOC_WRITE, 0x4b, 0x82, 0x28), 0x7ffe2d4375c0) = -1 ENOTTY (对设备不适当的 ioctl 操作) <0.000002>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437750) = 0 <0.000013>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437750) = 0 <0.000004>
+ioctl(3, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, 0x7ffe2d437740) = 0 <0.000013>
+ioctl(3, AMDKFD_IOC_FREE_MEMORY_OF_GPU, 0x7ffe2d437740) = 0 <0.000004>
++++ exited with 0 +++
 
 # 记录每个 IOCTL 的：命令号、耗时、是否有 mmap 调用
 
 # Step 1.3：观察内存映射
 # 在你的 hsa_queue_create 后加 sleep(60)，重新编译
-cat /proc/$(pgrep your_app)/maps > maps_after_queue_create.txt
-# 分析各段的用途（ring buffer / doorbell / signal）
+./hsa_vector_add &
+PID=$!
+cat /proc/$PID/maps > maps_after_queue_create.txt
+wait $PID
+# 分析各段的用途（ring buffer / doorbell / signal）cadd
+cat maps_after_queue_create.txt 
+6316350a9000-6316350ab000 r--p 00000000 103:03 7106945                   /home/wangyancheng/rocm-5.6/rocm-research/experiments/hsa_vector_add/hsa_vector_add
+6316350ab000-6316350ae000 r-xp 00002000 103:03 7106945                   /home/wangyancheng/rocm-5.6/rocm-research/experiments/hsa_vector_add/hsa_vector_add
+6316350ae000-6316350af000 r--p 00005000 103:03 7106945                   /home/wangyancheng/rocm-5.6/rocm-research/experiments/hsa_vector_add/hsa_vector_add
+6316350b0000-6316350b2000 rw-p 00006000 103:03 7106945                   /home/wangyancheng/rocm-5.6/rocm-research/experiments/hsa_vector_add/hsa_vector_add
+71a715c00000-71a715c28000 r--p 00000000 103:03 16909263                  /usr/lib/x86_64-linux-gnu/libc.so.6
+71a715c28000-71a715dbd000 r-xp 00028000 103:03 16909263                  /usr/lib/x86_64-linux-gnu/libc.so.6
+71a715dbd000-71a715e15000 r--p 001bd000 103:03 16909263                  /usr/lib/x86_64-linux-gnu/libc.so.6
+71a715e15000-71a715e16000 ---p 00215000 103:03 16909263                  /usr/lib/x86_64-linux-gnu/libc.so.6
+71a715e16000-71a715e1c000 rw-p 00215000 103:03 16909263                  /usr/lib/x86_64-linux-gnu/libc.so.6
+71a715e1c000-71a715e29000 rw-p 00000000 00:00 0 
+71a716000000-71a71609a000 r--p 00000000 103:03 16917399                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30
+71a71609a000-71a7161ab000 r-xp 0009a000 103:03 16917399                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30
+71a7161ab000-71a71621a000 r--p 001ab000 103:03 16917399                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30
+71a71621a000-71a71621b000 ---p 0021a000 103:03 16917399                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30
+71a71621b000-71a716229000 rw-p 0021a000 103:03 16917399                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30
+71a716229000-71a71622c000 rw-p 00000000 00:00 0 
+71a716400000-71a71641b000 r--p 00000000 103:03 29753436                  /opt/rocm-5.6/lib/libhsa-runtime64.so.1.9.0
+71a71641b000-71a7165c1000 r-xp 0001b000 103:03 29753436                  /opt/rocm-5.6/lib/libhsa-runtime64.so.1.9.0
+71a7165c1000-71a716697000 r--p 001c1000 103:03 29753436                  /opt/rocm-5.6/lib/libhsa-runtime64.so.1.9.0
+71a716697000-71a7167e6000 rw-p 00296000 103:03 29753436                  /opt/rocm-5.6/lib/libhsa-runtime64.so.1.9.0
+71a7167e6000-71a7167ea000 rw-p 00000000 00:00 0 
+71a7167ed000-71a7167fb000 r--p 00000000 103:03 16909324                  /usr/lib/x86_64-linux-gnu/libm.so.6
+71a7167fb000-71a716877000 r-xp 0000e000 103:03 16909324                  /usr/lib/x86_64-linux-gnu/libm.so.6
+71a716877000-71a7168d4000 r--p 0008a000 103:03 16909324                  /usr/lib/x86_64-linux-gnu/libm.so.6
+71a7168d4000-71a7168d7000 r--p 00000000 103:03 16928028                  /usr/lib/x86_64-linux-gnu/libnuma.so.1.0.0
+71a7168d7000-71a7168dd000 r-xp 00003000 103:03 16928028                  /usr/lib/x86_64-linux-gnu/libnuma.so.1.0.0
+71a7168dd000-71a7168df000 r--p 00009000 103:03 16928028                  /usr/lib/x86_64-linux-gnu/libnuma.so.1.0.0
+71a7168df000-71a7168e1000 rw-p 0000a000 103:03 16928028                  /usr/lib/x86_64-linux-gnu/libnuma.so.1.0.0
+71a7168e1000-71a7168e5000 r--p 00000000 103:03 29768277                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.123.0
+71a7168e5000-71a7168ed000 r-xp 00004000 103:03 29768277                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.123.0
+71a7168ed000-71a7168ef000 r--p 0000c000 103:03 29768277                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.123.0
+71a7168ef000-71a7168f1000 rw-p 0000d000 103:03 29768277                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.123.0
+71a7168f1000-71a7168f6000 r--p 00000000 103:03 29768272                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.123.0
+71a7168f6000-71a716904000 r-xp 00005000 103:03 29768272                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.123.0
+71a716904000-71a716908000 r--p 00013000 103:03 29768272                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.123.0
+71a716908000-71a716909000 ---p 00017000 103:03 29768272                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.123.0
+71a716909000-71a71690b000 rw-p 00017000 103:03 29768272                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.123.0
+71a71690b000-71a71690d000 rw-p 00000000 00:00 0 
+71a71690d000-71a716910000 r--p 00000000 103:03 16920018                  /usr/lib/x86_64-linux-gnu/libelf-0.186.so
+71a716910000-71a716924000 r-xp 00003000 103:03 16920018                  /usr/lib/x86_64-linux-gnu/libelf-0.186.so
+71a716924000-71a716928000 r--p 00017000 103:03 16920018                  /usr/lib/x86_64-linux-gnu/libelf-0.186.so
+71a716928000-71a716929000 ---p 0001b000 103:03 16920018                  /usr/lib/x86_64-linux-gnu/libelf-0.186.so
+71a716929000-71a71692b000 rw-p 0001b000 103:03 16920018                  /usr/lib/x86_64-linux-gnu/libelf-0.186.so
+71a71692b000-71a71692e000 r--p 00000000 103:03 16908381                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+71a71692e000-71a716945000 r-xp 00003000 103:03 16908381                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+71a716945000-71a716949000 r--p 0001a000 103:03 16908381                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+71a716949000-71a71694b000 rw-p 0001d000 103:03 16908381                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+71a71694b000-71a716965000 r--p 00000000 103:03 17039610                  /etc/ld.so.cache
+71a716965000-71a716967000 rw-p 00000000 00:00 0 
+71a716967000-71a716969000 r--p 00000000 103:03 16909100                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+71a716969000-71a716993000 r-xp 00002000 103:03 16909100                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+71a716993000-71a71699e000 r--p 0002c000 103:03 16909100                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+71a71699f000-71a7169a3000 rw-p 00037000 103:03 16909100                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7ffd3e861000-7ffd3e882000 rw-p 00000000 00:00 0                          [stack]
+7ffd3e99d000-7ffd3e9a1000 r--p 00000000 00:00 0                          [vvar]
+7ffd3e9a1000-7ffd3e9a3000 r-xp 00000000 00:00 0                          [vdso]
+ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsyscall]
 
 # Step 1.4：rocprofiler 时序可视化
 rocprof --hsa-trace -o rocprof_out ./your_hsa_app

@@ -164,12 +164,12 @@
       "-x",
       "hip",
       "-o",
-      "/tmp/hello_world-5fcfb6/hello_world-gfx906.o",
+      "/tmp/hello_world-12a097/hello_world-gfx906.o",
       "hello_world.cpp"
     ],
     "directory": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/hello_world",
     "file": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/hello_world/hello_world.cpp",
-    "output": "/tmp/hello_world-5fcfb6/hello_world-gfx906.o"
+    "output": "/tmp/hello_world-12a097/hello_world-gfx906.o"
   },
   {
     "arguments": [
@@ -266,7 +266,7 @@
       "-mllvm",
       "-amdgpu-function-calls=false",
       "-fcuda-include-gpubinary",
-      "/tmp/hello_world-bc9e36.hipfb",
+      "/tmp/hello_world-a7e19a.hipfb",
       "-cuid=868f44c6521cc4c0",
       "-fcuda-allow-variadic-functions",
       "-faddrsig",
@@ -274,12 +274,12 @@
       "-x",
       "hip",
       "-o",
-      "/tmp/hello_world-863230.o",
+      "/tmp/hello_world-9da78b.o",
       "hello_world.cpp"
     ],
     "directory": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/hello_world",
     "file": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/hello_world/hello_world.cpp",
-    "output": "/tmp/hello_world-863230.o"
+    "output": "/tmp/hello_world-9da78b.o"
   },
   {
     "arguments": [
@@ -432,12 +432,12 @@
       "-x",
       "hip",
       "-o",
-      "/tmp/vector_add-d94e14/vector_add-gfx906.o",
+      "/tmp/vector_add-4d2657/vector_add-gfx906.o",
       "vector_add.cpp"
     ],
     "directory": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/vector_add",
     "file": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/vector_add/vector_add.cpp",
-    "output": "/tmp/vector_add-d94e14/vector_add-gfx906.o"
+    "output": "/tmp/vector_add-4d2657/vector_add-gfx906.o"
   },
   {
     "arguments": [
@@ -534,7 +534,7 @@
       "-mllvm",
       "-amdgpu-function-calls=false",
       "-fcuda-include-gpubinary",
-      "/tmp/vector_add-e1e886.hipfb",
+      "/tmp/vector_add-865d70.hipfb",
       "-cuid=230a8d61e999027",
       "-fcuda-allow-variadic-functions",
       "-faddrsig",
@@ -542,11 +542,28 @@
       "-x",
       "hip",
       "-o",
-      "/tmp/vector_add-7fd43f.o",
+      "/tmp/vector_add-3a6a8f.o",
       "vector_add.cpp"
     ],
     "directory": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/vector_add",
     "file": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/vector_add/vector_add.cpp",
-    "output": "/tmp/vector_add-7fd43f.o"
+    "output": "/tmp/vector_add-3a6a8f.o"
+  },
+  {
+    "arguments": [
+      "/usr/local/bin/g++",
+      "-c",
+      "-I/opt/rocm-5.6/include",
+      "-Wl,-rpath,/opt/rocm-5.6/lib",
+      "-std=c++17",
+      "-O2",
+      "-g",
+      "-o",
+      "hsa_vector_add",
+      "hsa_vector_add.cpp"
+    ],
+    "directory": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/hsa_vector_add",
+    "file": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/hsa_vector_add/hsa_vector_add.cpp",
+    "output": "/home/wangyancheng/rocm-5.6/rocm-research/experiments/hsa_vector_add/hsa_vector_add"
   }
 ]

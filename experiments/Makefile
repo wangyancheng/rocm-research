@@ -1,5 +1,5 @@
 # 列出所有包含 Makefile 的子目录
-SUBDIRS := aql_run hello_world vector_add
+SUBDIRS := aql_run hello_world vector_add hsa_vector_add
 
 # 默认目标：编译所有子目录
 all:
