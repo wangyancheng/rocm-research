@@ -2204,25 +2204,11 @@ void hsa_signal_subtract_release(
 c
 
 ```
-void hsa_signal_and_scacq_screl(
-    hsa_signal_t signal,
-    hsa_signal_value_t value
-);
-
-void hsa_signal_and_scacquire(
-    hsa_signal_t signal,
-    hsa_signal_value_t value
-);
-
-void hsa_signal_and_relaxed(
-    hsa_signal_t signal,
-    hsa_signal_value_t value
-);
-
-void hsa_signal_and_screlease(
-    hsa_signal_t signal,
-    hsa_signal_value_t value
-);
+void hsa_signal_and_scacq_screl(    hsa_signal_t signal,    hsa_signal_value_t value);void hsa_signal_and_scacquire(    hsa_signal_t signal,    hsa_signal_value_t value);void hsa_signal_and_relaxed(    hsa_signal_t signal,    hsa_signal_value_t value);void hsa_signal_and_screlease(    hsa_signal_t signal,Initializes the HSA runtime if it is not already initialized, and
+ * increases the reference counter associated with the HSA runtime for the
+ * current process. Invocation of any HSA function other than ::hsa_init results
+ * in undefined behavior if the current HSA runtime reference counter is less
+ * than one.    hsa_signal_value_t value);
 ```
 
 
@@ -4887,7 +4873,7 @@ typedef enum {
 - `HSA_REGION_SEGMENT_GLOBAL`：全局段。用于保存所有代理共享的数据。
 - `HSA_REGION_SEGMENT_READONLY`：只读段。用于保存在内核执行期间保持恒定的数据。
 - `HSA_REGION_SEGMENT_PRIVATE`：私有段。用于保存单个工作项局部的数据。
-- `HSA_REGION_SEGMENT_GROUP`：组段。用于保存工作组中工作项共享的数据。
+- `HSA_REGION_SEGMENT_GROUP`：组段。用于保存工作组中工作项共享的数据。g
 - `HSA_REGION_SEGMENT_KERNARG`：Kernarg 段。用于保存工作组中工作项共享的数据（内核参数）。
 
 #### 2.7.4.3 `hsa_region_global_flag_t`

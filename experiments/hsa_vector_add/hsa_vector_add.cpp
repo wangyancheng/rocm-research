@@ -34,7 +34,7 @@
  * ROCm 版本 : 5.6
  * HSA 规范  : 1.2  (hsa_ext_amd.h 扩展)
  */
-
+ 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
@@ -130,6 +130,42 @@ static hsa_status_t cb_find_gpu_pool(hsa_amd_memory_pool_t pool, void* data)
 
     hsa_amd_segment_t seg;
     hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);     // 内存段类型：GLOBAL / GROUP / PRIVATE 
+    
+    #if false
+    uint32_t global_flags = 0;
+    bool allocable = false;
+    size_t size = 0;
+    hsa_agent_t* agent = (hsa_agent_t*)data;
+
+    // 查询段类型
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);
+    // 查询大小
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &size);
+    // 是否可分配
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allocable);
+    // 全局内存的标志（仅 GLOBAL 段有意义）
+    if (seg == HSA_AMD_SEGMENT_GLOBAL) {
+        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flags);
+    }
+
+    printf("  GPU Pool: %p, Segment: ", (void*)pool.handle);
+    switch (seg) {
+        case HSA_AMD_SEGMENT_GLOBAL:  printf("GLOBAL"); break;
+        case HSA_AMD_SEGMENT_GROUP:   printf("GROUP"); break;
+        case HSA_AMD_SEGMENT_PRIVATE: printf("PRIVATE"); break;
+        default: printf("UNKNOWN");
+    }
+    printf(", Size: %zu MB", size / (1024*1024));
+    printf(", Allocable: %s", allocable ? "yes" : "no");
+    if (seg == HSA_AMD_SEGMENT_GLOBAL) {
+        printf(", Flags: [");
+        if (global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) printf("KERNARG ");        // 内核参数专用池
+        if (global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) printf("FINE_GRAINED ");   // 细粒度系统内存池
+        if (global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) printf("COARSE_GRAINED ");   // 粗粒度本地显存池
+        printf("]");
+    }
+    printf("\n");
+    #endif
 
     /* 只关心 GLOBAL segment（对应 VRAM / Device Memory） */
     if (seg == HSA_AMD_SEGMENT_GLOBAL && !ctx->gpu_global_found) {      // 可能有多个 global pool，选第一个允许分配的（部分 global pool 是只读的）
@@ -151,6 +187,42 @@ static hsa_status_t cb_find_cpu_pool(hsa_amd_memory_pool_t pool, void* data)
 
     hsa_amd_segment_t seg;
     hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);
+
+    #if false
+    uint32_t global_flags = 0;
+    bool allocable = false;
+    size_t size = 0;
+    hsa_agent_t* agent = (hsa_agent_t*)data;
+
+    // 查询段类型
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);
+    // 查询大小
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &size);
+    // 是否可分配
+    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allocable);
+    // 全局内存的标志（仅 GLOBAL 段有意义）
+    if (seg == HSA_AMD_SEGMENT_GLOBAL) {
+        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flags);
+    }
+
+    printf("  CPU Pool: %p, Segment: ", (void*)pool.handle);
+    switch (seg) {
+        case HSA_AMD_SEGMENT_GLOBAL:  printf("GLOBAL"); break;
+        case HSA_AMD_SEGMENT_GROUP:   printf("GROUP"); break;
+        case HSA_AMD_SEGMENT_PRIVATE: printf("PRIVATE"); break;
+        default: printf("UNKNOWN");
+    }
+    printf(", Size: %zu MB", size / (1024*1024));
+    printf(", Allocable: %s", allocable ? "yes" : "no");
+    if (seg == HSA_AMD_SEGMENT_GLOBAL) {
+        printf(", Flags: [");
+        if (global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) printf("KERNARG ");
+        if (global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) printf("FINE_GRAINED ");
+        if (global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) printf("COARSE_GRAINED ");
+        printf("]");
+    }
+    printf("\n");
+    #endif
 
     if (seg != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;       // 只关心 GLOBAL segment
 
@@ -387,9 +459,17 @@ int main()
     }
 
     /* 查询 wavefront 大小（gfx906 = 64，部分新架构支持 32） */
-    /* MI50,有60个CU，每个CU有64个线程 */
+    /* 
+     * CU：GPU上的一个“计算核心”，类似CPU的一个物理核。MI50 有 60 个 CU。每个 CU 内部有自己的寄存器、LDS（shared memory）、SIMD 单元（4个）。
+     * SIMD：CU 内部的执行单元，一条指令同时对多个数据做同样的运算。gfx906 每个 CU 有 4 个 SIMD，每个 SIMD 宽度 16。
+     * wavefront：AMD GPU 的"线程束"，64 个线程绑在一起，共享一个指令流，同步执行同一条指令（在不同数据上）。这是调度的最小单位，不能拆开。对应 NVIDIA 的 warp（NVIDIA 是 32 线程）。
+     * 你写 kernel 代码时面向的逻辑单位，每个 thread 处理一份数据。但硬件层面 thread 不是独立调度的，它只是 wavefront 里的"一个槽位"。
+     * 
+     * 每周期处理量：60 (CU) × 4 (SIMD) × 16 (SIMD宽度) = 3840 数据点/周期
+     * 4个周期处理完整的 wavefront：3840 × 4 = 15360 数据点
+     */
     uint32_t wavefront_size = 0;
-    hsa_agent_get_info(agents.gpu, HSA_AGENT_INFO_WAVEFRONT_SIZE, &wavefront_size);
+    HSA_CHECK(hsa_agent_get_info(agents.gpu, HSA_AGENT_INFO_WAVEFRONT_SIZE, &wavefront_size));
     std::cout << "       GPU Wavefront size: " << wavefront_size << "\n";
 
     /* ────────────────────────────────────────────────────────────
@@ -397,6 +477,8 @@ int main()
      *
      * 对 GPU Agent 找 VRAM global pool（存放数组数据）。
      * 对 CPU Agent 找 kernarg pool（存放内核参数，细粒度系统内存）。
+     * GPU有COARSE_GRAINED和GROUP两个内存池，分别对应着VRAM和LDS。
+     * CPU有FINE_GRAINED，KERNARG FINE_GRAINED,COARSE_GRAINED三个内存池，分别对应着系统内存，内核参数专用池和粗粒度系统内存。
      * ────────────────────────────────────────────────────────────*/
     PoolCtx pools;
     HSA_CHECK(hsa_amd_agent_iterate_memory_pools(agents.gpu, cb_find_gpu_pool, &pools));

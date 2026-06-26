@@ -581,7 +581,6 @@ sqlite3 trace_out.db
 .headers on
 
 -- 2. 核心大招：只提取函数名和时间戳，并严格按开始时间从小到大（从早到晚）排序
-sqlite3 trace_out.db
 SELECT 
     Name AS Function_Name,
     BeginNs AS Start_Timestamp_ns,
@@ -592,37 +591,50 @@ ORDER BY BeginNs ASC;
 # 预期看到的调用顺序：
 # hsa_init
 hsa_iterate_agents
-hsa_agent_get_info
-hsa_agent_get_info
-hsa_agent_get_info
-hsa_agent_get_info
-hsa_agent_get_info
-hsa_amd_agent_iterate_memory_pools
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_get_info
-hsa_amd_agent_iterate_memory_pools
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_get_info
-hsa_amd_memory_pool_allocate
-hsa_amd_memory_pool_allocate
-hsa_amd_memory_pool_allocate
-hsa_amd_agents_allow_access
-hsa_amd_agents_allow_access
-hsa_amd_agents_allow_access
-hsa_memory_copy
-hsa_memory_copy
-hsa_queue_create
-hsa_code_object_reader_create_from_memory
-hsa_executable_create
-hsa_executable_load_agent_code_object
-hsa_executable_freeze
-hsa_signal_create
-hsa_signal_wait_scacquire
+hsa_agent_get_info		#代理枚举（CPU），查询类型
+hsa_agent_get_info		#代理枚举（CPU），查询名字
+hsa_agent_get_info		#代理枚举（GPU），查询类型
+hsa_agent_get_info		#代理枚举（GPU），查询名字
+hsa_agent_get_info		#查询wavefront大小，MI50有60个CU,每个CU有64个wavefront
+hsa_amd_agent_iterate_memory_pools	#GPU内存枚举
+hsa_amd_memory_pool_get_info	#GPU内存段GLOBAL
+hsa_amd_memory_pool_get_info	#GPU内存标志COARSE_GRAINED
+hsa_amd_memory_pool_get_info	#GPU内存段GROUP
+hsa_amd_agent_iterate_memory_pools	#CPU内存枚举
+hsa_amd_memory_pool_get_info	#CPU内存段GLOBAL
+hsa_amd_memory_pool_get_info	#CPU内存标志FINE_GRAINED
+hsa_amd_memory_pool_get_info	#CPU内存段GLOBAL
+hsa_amd_memory_pool_get_info	#CPU内存标志KERNARG FINE_GRAINED
+hsa_amd_memory_pool_get_info	#CPU内存段GLOBAL
+hsa_amd_memory_pool_get_info	#CPU内存标志COARSE_GRAINED
+hsa_amd_memory_pool_allocate	#在GPU VRAM分配数组A
+hsa_amd_memory_pool_allocate	#在GPU VRAM分配数组B
+hsa_amd_memory_pool_allocate	#在GPU VRAM分配数组C
+hsa_amd_agents_allow_access		#授权CPU访问数组A
+hsa_amd_agents_allow_access		#授权CPU访问数组B
+hsa_amd_agents_allow_access		#授权CPU访问数组C
+hsa_memory_copy			#把数据拷贝到数组A
+hsa_memory_copy			#把数据拷贝到数组B
+hsa_queue_create		#创建队列
+hsa_code_object_reader_create_from_memory	#创建一个操作内存的代码对象读取器
+hsa_executable_create		#创建一个空的可执行文件
+hsa_executable_load_agent_code_object	#将代理代码对象加载到可执行文件中
+hsa_executable_freeze		#冻结可执行文件
+#没抓到
+hsa_executable_get_symbol_by_name	#按名称从冻结可执行文件中获取内核或变量的符号句柄，内核符号通常为 "kernelname.kd"。
+    								#获取的句柄用于 hsa_executable_symbol_get_info 查询内核对象地址、段大小等。
+hsa_executable_symbol_get_info		#内核对象：GPU 执行所需的代码入口物理地址（由 GPUVM 映射后得到）
+hsa_executable_symbol_get_info		#每线程私有内存（spill registers / stack），本内核应为 0
+hsa_executable_symbol_get_info		#整个 workgroup 共享的 LDS 大小，本内核应为 0
+hsa_executable_symbol_get_info		#内核元数据规定的 kernarg 区域大小（由编译器根据参数列表计算
+hsa_amd_memory_pool_allocate		#分配参数的内存
+hsa_amd_agents_allow_access			#允许参数内存GPU可访问
+#
+hsa_signal_create					#创建完成信号
+#没抓到
+hsa_signal_store_relaxed			#敲 Doorbell
+#
+hsa_signal_wait_scacquire			#等待 GPU 完成
 hsa_signal_destroy
 hsa_executable_get_symbol_by_name
 hsa_executable_symbol_get_info

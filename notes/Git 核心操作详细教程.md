@@ -38,6 +38,8 @@ Git 的提交分为“三部曲”：
 
 当你需要与他人协作或备份代码到 GitHub/Gitee 时：
 
+推ROCR-Runtime：git push origin HEAD:refs/heads/rocm-5.6.0
+
 | 命令                            | 说明            |
 |:----------------------------- |:------------- |
 | `git remote add origin [url]` | 关联本地仓库与远程仓库   |
